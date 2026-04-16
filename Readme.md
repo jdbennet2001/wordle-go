@@ -41,7 +41,8 @@ The result is a lightweight app that is easy to run locally and easy to publish 
 .
 ├── .github/
 │   └── workflows/
-│       └── deploy-pages.yml
+│       ├── deploy-pages.yml
+│       └── publish-ghcr.yml
 ├── .vscode/
 │   └── launch.json
 ├── public/
@@ -210,6 +211,97 @@ In your GitHub repository settings:
 3. Click Run workflow
 
 After deploy, GitHub provides the published page URL from the deploy job output/environment URL.
+
+## GHCR Docker Publish
+
+This repository also includes a workflow to build and push a Docker image to GitHub Container Registry (GHCR):
+
+- .github/workflows/publish-ghcr.yml
+
+It runs on:
+
+- Manual trigger only (workflow_dispatch)
+
+### What gets published
+
+The image is pushed to:
+
+- ghcr.io/<owner>/<repo>
+
+For this repository, that resolves to:
+
+- ghcr.io/jdbennet2001/wordle-go
+
+### Environment variables used in the workflow
+
+The workflow defines these top-level env values:
+
+1. REGISTRY
+	Value: ghcr.io
+	Purpose: tells docker/login-action and docker/metadata-action which registry host to use.
+2. IMAGE_NAME
+	Value: ${{ github.repository }}
+	Purpose: uses owner/repo from the current repository automatically, so image names stay consistent across forks and clones.
+
+The workflow also uses these GitHub-provided context values and secrets:
+
+1. github.actor
+	Purpose: username used when logging into GHCR.
+2. secrets.GITHUB_TOKEN
+	Purpose: short-lived token used to authenticate pushes to GHCR from Actions.
+3. github.repository
+	Purpose: owner/repo value used in image naming and output messages.
+4. github.repository_owner
+	Purpose: used in the package-page output URL.
+
+### Tags that are produced
+
+The workflow uses docker/metadata-action to generate tags:
+
+1. Branch tag (for branch builds)
+2. Git tag tag (for version tags)
+3. Commit SHA tag
+4. latest (only on the default branch)
+
+### Repository configuration required
+
+Before the workflow can publish successfully, configure the repository as follows:
+
+1. Actions permissions
+	Go to Settings -> Actions -> General.
+	Under Workflow permissions, allow read and write permissions for GITHUB_TOKEN.
+2. Package permissions
+	Ensure the workflow has packages: write permission (already set in publish-ghcr.yml).
+3. GHCR package visibility
+	The first push may create a private package by default.
+	Open the package in GitHub Packages and set visibility to Public if you want anonymous pulls.
+4. Branch expectations
+	This workflow does not run automatically on branch pushes.
+	Run it explicitly from the Actions tab when you want to publish.
+
+### Manual publish steps
+
+1. Open GitHub -> Actions.
+2. Select Build and Publish GHCR Image.
+3. Click Run workflow.
+4. Wait for completion and review the Print image references step output.
+
+### Pulling the image
+
+After publish, pull with:
+
+```bash
+docker pull ghcr.io/jdbennet2001/wordle-go:latest
+```
+
+Or use one of the SHA/branch/tag versions printed by the workflow.
+
+### Optional customizations
+
+Common changes you may want:
+
+1. Use a different image naming scheme
+	Override IMAGE_NAME with a fixed value such as jdbennet2001/wordle-go-web.
 
 ## Development Notes
 
