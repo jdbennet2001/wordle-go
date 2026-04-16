@@ -8,7 +8,6 @@ permissions:
   pages: write
   id-token: write
 
-# Prevent concurrent deploys; cancel in-progress runs for the same ref.
 concurrency:
   group: pages-${{ github.ref }}
   cancel-in-progress: true
@@ -17,27 +16,30 @@ jobs:
   build:
     name: Build static site
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      # GitHub Pages serves the repo under /<repository-name>/ so we need to
-      # patch the root-relative paths in index.html to use a relative base.
-      - name: Patch asset paths for Pages sub-path
+      - name: Patch asset paths for GitHub Pages subpath
         run: |
           REPO_NAME="${{ github.event.repository.name }}"
           BASE="/${REPO_NAME}"
 
-          # Replace absolute paths for the three assets we control.
+          echo "Using base path: ${BASE}"
+
+          # Update index.html paths
           sed -i \
             -e "s|href=\"/style.css\"|href=\"${BASE}/style.css\"|g" \
             -e "s|src=\"/app.js\"|src=\"${BASE}/app.js\"|g" \
             public/index.html
 
-          # Patch the fetch path for words.json inside app.js.
-          sed -i "s|\"/words.json\"|\"${BASE}/words.json\"|g" public/app.js
+          # Update JS fetch path
+          sed -i \
+            -e "s|\"/words.json\"|\"${BASE}/words.json\"|g" \
+            public/app.js
 
-      - name: Upload Pages artifact
+      - name: Upload artifact for Pages
         uses: actions/upload-pages-artifact@v3
         with:
           path: public
@@ -46,6 +48,7 @@ jobs:
     name: Deploy to GitHub Pages
     needs: build
     runs-on: ubuntu-latest
+
     environment:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
@@ -54,9 +57,3 @@ jobs:
       - name: Deploy
         id: deploy
         uses: actions/deploy-pages@v4
-
-      - name: Print published URL
-        run: |
-          echo "=================================================="
-          echo "  Wordle Go is live at: ${{ steps.deploy.outputs.page_url }}"
-          echo "=================================================="
