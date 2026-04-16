@@ -277,7 +277,7 @@
   }
 
   function loadWords() {
-    return $.getJSON("/words.json").then((data) => {
+    return $.getJSON("words.json").then((data) => {
       words = (data || [])
         .filter((w) => typeof w === "string")
         .map((w) => w.trim().toLowerCase())
