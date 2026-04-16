@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Wordle Go</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <main class="app-shell">
+    <header class="app-header">
+      <h1>Wordle Go</h1>
+      <div class="header-actions">
+        <button id="share-btn" type="button" disabled>Share</button>
+        <button id="new-game-btn" type="button">New Puzzle</button>
+      </div>
+    </header>
+
+    <section class="status-wrap" aria-live="polite">
+      <p id="status-text">Loading words...</p>
+    </section>
+
+    <section class="board-wrap">
+      <div id="board" class="board" aria-label="Wordle board"></div>
+    </section>
+
+    <section class="keyboard-wrap" aria-label="On-screen keyboard">
+      <div id="keyboard" class="keyboard"></div>
+    </section>
+  </main>
+
+  <script src="https://code.jquery.com/jquery-3.7.1.min.js" integrity="sha256-/JqT3SQfawRcv/BIHPThkBvs0OEvtFFmqPF/lYI/Cxo=" crossorigin="anonymous"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

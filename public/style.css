@@ -1,0 +1,254 @@
+:root {
+  --bg-a: #f1efe7;
+  --bg-b: #dde8f3;
+  --panel: rgba(255, 255, 255, 0.82);
+  --ink: #1f252d;
+  --muted: #566171;
+  --tile-empty: #ffffff;
+  --tile-border: #c3ccd8;
+  --tile-miss: #747f8f;
+  --tile-hit: #3a8f5a;
+  --tile-near: #cc9a2f;
+  --key-bg: #d8dee8;
+  --shadow: 0 12px 26px rgba(31, 37, 45, 0.12);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  color: var(--ink);
+  font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+  background: radial-gradient(circle at 12% 8%, #fef9e8 0%, transparent 42%),
+    radial-gradient(circle at 88% 12%, #d4e5f8 0%, transparent 38%),
+    linear-gradient(155deg, var(--bg-a), var(--bg-b));
+}
+
+body {
+  padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+}
+
+.app-shell {
+  width: min(760px, 100vw);
+  margin: 0 auto;
+  min-height: 100dvh;
+  padding: 18px 14px 20px;
+  display: grid;
+  gap: 14px;
+  grid-template-rows: auto auto 1fr auto;
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: var(--panel);
+  border: 1px solid rgba(31, 37, 45, 0.08);
+  border-radius: 14px;
+  padding: 12px 14px;
+  box-shadow: var(--shadow);
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: clamp(1.2rem, 3vw, 1.7rem);
+  letter-spacing: 0.04em;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.header-actions button {
+  border: 1px solid rgba(31, 37, 45, 0.18);
+  background: #f8fafc;
+  color: var(--ink);
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.header-actions button:hover {
+  background: #eef4fb;
+}
+
+#share-btn[disabled] {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.status-wrap {
+  background: var(--panel);
+  border: 1px solid rgba(31, 37, 45, 0.08);
+  border-radius: 12px;
+  padding: 10px 12px;
+  box-shadow: var(--shadow);
+}
+
+#status-text {
+  margin: 0;
+  color: var(--muted);
+  font-weight: 600;
+  min-height: 1.3em;
+}
+
+.board-wrap {
+  display: grid;
+  place-items: center;
+}
+
+.board {
+  display: grid;
+  gap: 6px;
+}
+
+.board-row {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(42px, 1fr));
+  gap: 6px;
+}
+
+.tile {
+  width: clamp(42px, 10.8vw, 64px);
+  height: clamp(42px, 10.8vw, 64px);
+  border: 2px solid var(--tile-border);
+  border-radius: 10px;
+  background: var(--tile-empty);
+  display: grid;
+  place-items: center;
+  font-size: clamp(1.2rem, 4vw, 1.9rem);
+  font-weight: 800;
+  text-transform: uppercase;
+  transition: transform 120ms ease, border-color 120ms ease, background-color 160ms ease;
+}
+
+.tile.filled {
+  border-color: #7f8da1;
+}
+
+.tile.flip {
+  transform: rotateX(90deg);
+}
+
+.tile.hit {
+  background: var(--tile-hit);
+  border-color: var(--tile-hit);
+  color: #fff;
+}
+
+.tile.near {
+  background: var(--tile-near);
+  border-color: var(--tile-near);
+  color: #fff;
+}
+
+.tile.miss {
+  background: var(--tile-miss);
+  border-color: var(--tile-miss);
+  color: #fff;
+}
+
+.keyboard-wrap {
+  background: var(--panel);
+  border: 1px solid rgba(31, 37, 45, 0.08);
+  border-radius: 14px;
+  padding: 10px;
+  box-shadow: var(--shadow);
+}
+
+.keyboard {
+  display: grid;
+  gap: 8px;
+}
+
+.key-row {
+  display: grid;
+  gap: 6px;
+  justify-content: center;
+}
+
+.key-row.row-1,
+.key-row.row-2 {
+  grid-template-columns: repeat(10, minmax(24px, 1fr));
+}
+
+.key-row.row-2 {
+  grid-template-columns: repeat(9, minmax(24px, 1fr));
+}
+
+.key-row.row-3 {
+  grid-template-columns: 1.5fr repeat(7, minmax(24px, 1fr)) 1.5fr;
+}
+
+.key {
+  border: 1px solid rgba(31, 37, 45, 0.16);
+  background: var(--key-bg);
+  color: #1d2630;
+  border-radius: 8px;
+  min-height: 44px;
+  padding: 0 8px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.key.hit {
+  background: var(--tile-hit);
+  border-color: var(--tile-hit);
+  color: #fff;
+}
+
+.key.near {
+  background: var(--tile-near);
+  border-color: var(--tile-near);
+  color: #fff;
+}
+
+.key.miss {
+  background: var(--tile-miss);
+  border-color: var(--tile-miss);
+  color: #fff;
+}
+
+@media (max-width: 480px) {
+  .app-shell {
+    padding: 12px 8px 12px;
+    gap: 10px;
+  }
+
+  .app-header {
+    padding: 10px;
+  }
+
+  .header-actions button {
+    padding: 7px 10px;
+    font-size: 0.85rem;
+  }
+
+  .key {
+    min-height: 40px;
+    font-size: 0.8rem;
+    padding: 0 4px;
+  }
+}
+
+@media (min-width: 768px) {
+  .app-shell {
+    padding: 24px 24px 26px;
+  }
+
+  .keyboard-wrap {
+    padding: 12px;
+  }
+
+  .key {
+    min-height: 48px;
+  }
+}
