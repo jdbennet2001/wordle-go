@@ -21,12 +21,6 @@
   const $status = $("#status-text");
   const $shareBtn = $("#share-btn");
 
-  function getDailyWord(list) {
-    const now = new Date();
-    const daySeed = Math.floor(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) / 86400000);
-    return list[daySeed % list.length];
-  }
-
   function getRandomWord(list) {
     return list[Math.floor(Math.random() * list.length)];
   }
@@ -238,7 +232,7 @@
     }
   }
 
-  function resetGame(useDailyWord) {
+  function resetGame() {
     guesses = Array.from({ length: MAX_GUESSES }, () => "");
     evaluatedRows = [];
     currentRow = 0;
@@ -247,7 +241,7 @@
     setShareEnabled(false);
     $(".key").removeClass("miss near hit");
     $(".tile").removeClass("filled miss near hit flip").text("");
-    answer = useDailyWord ? getDailyWord(words) : getRandomWord(words);
+    answer = getRandomWord(words);
     setStatus(`Guess 1 of ${MAX_GUESSES}`);
     syncBoard();
   }
@@ -267,7 +261,7 @@
     });
 
     $("#new-game-btn").on("click", () => {
-      resetGame(false);
+      resetGame();
       setStatus("New random puzzle started.");
     });
 
@@ -298,8 +292,8 @@
 
     loadWords()
       .then(() => {
-        resetGame(true);
-        setStatus(`Daily puzzle ready. Guess 1 of ${MAX_GUESSES}`);
+        resetGame();
+        setStatus(`Random puzzle ready. Guess 1 of ${MAX_GUESSES}`);
       })
       .catch((error) => {
         gameOver = true;
