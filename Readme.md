@@ -296,6 +296,183 @@ docker pull ghcr.io/jdbennet2001/wordle-go:latest
 
 Or use one of the SHA/branch/tag versions printed by the workflow.
 
+## Local Deployment - Docker (Basic Test)
+
+For a quick test, run the image directly with Docker on port 2000.
+
+### Pull and run in one step
+
+```bash
+docker run -p 2000:3000 --rm ghcr.io/jdbennet2001/wordle-go:latest
+```
+
+This command:
+
+- `-p 2000:3000` — maps container port 3000 to your localhost port 2000
+- `--rm` — automatically removes the container when it exits
+- `ghcr.io/jdbennet2001/wordle-go:latest` — pulls the image if not present and runs it
+
+### Access the app
+
+Open your browser:
+
+```
+http://localhost:2000
+```
+
+### View logs
+
+Logs print to stdout, so you see them in your terminal. The app starts with:
+
+```
+Wordle server listening on http://localhost:3000
+```
+
+### Stop the container
+
+Press `Ctrl+C` in the terminal where the container is running.
+
+## Local Deployment - Docker Desktop (Kubernetes)
+
+You can deploy the GHCR image to Kubernetes running on Docker Desktop. This section covers pulling the image and exposing the app on port 2500.
+
+### Prerequisites
+
+1. Docker Desktop installed with Kubernetes enabled
+   - Open Docker Desktop Preferences -> Kubernetes
+   - Check "Enable Kubernetes"
+   - Click "Apply & Restart"
+   - Wait for Kubernetes to start (green indicator shows in Docker menu)
+
+2. kubectl installed and configured
+   - Docker Desktop includes kubectl automatically
+   - Verify with: kubectl version --client
+
+### Pull the image
+
+Pull the latest image from GHCR:
+
+```bash
+docker pull ghcr.io/jdbennet2001/wordle-go:latest
+```
+
+### Create a Kubernetes Deployment
+
+Create a file named `wordle-deployment.yaml`:
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wordle-go
+  labels:
+    app: wordle-go
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: wordle-go
+  template:
+    metadata:
+      labels:
+        app: wordle-go
+    spec:
+      containers:
+      - name: wordle-go
+        image: ghcr.io/jdbennet2001/wordle-go:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 3000
+          name: http
+        env:
+        - name: PORT
+          value: "3000"
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "100m"
+          limits:
+            memory: "128Mi"
+            cpu: "500m"
+```
+
+### Create a Kubernetes Service
+
+Create a file named `wordle-service.yaml`:
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: wordle-go-service
+  labels:
+    app: wordle-go
+spec:
+  type: LoadBalancer
+  ports:
+  - port: 2500
+    targetPort: 3000
+    protocol: TCP
+    name: http
+  selector:
+    app: wordle-go
+```
+
+### Deploy to Kubernetes
+
+Apply both manifests:
+
+```bash
+kubectl apply -f wordle-deployment.yaml
+kubectl apply -f wordle-service.yaml
+```
+
+### Verify deployment
+
+Check pod status:
+
+```bash
+kubectl get pods -l app=wordle-go
+```
+
+Check service status:
+
+```bash
+kubectl get svc wordle-go-service
+```
+
+Watch logs:
+
+```bash
+kubectl logs -l app=wordle-go -f
+```
+
+### Access the app
+
+Once the service shows an external IP (usually `localhost` on Docker Desktop), open your browser:
+
+```
+http://localhost:2500
+```
+
+The LoadBalancer service type automatically exposes the container port 3000 to your host on port 2500.
+
+### Cleanup
+
+Delete the deployment and service:
+
+```bash
+kubectl delete -f wordle-deployment.yaml
+kubectl delete -f wordle-service.yaml
+```
+
+Or delete by name:
+
+```bash
+kubectl delete deployment wordle-go
+kubectl delete service wordle-go-service
+```
+
 ### Optional customizations
 
 Common changes you may want:
