@@ -4,7 +4,14 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>Wordle Go</title>
-  <link rel="stylesheet" href="style.css">
+  <link id="app-style" rel="stylesheet" href="style.css">
+  <script>
+    (function () {
+      var key = Date.now();
+      document.getElementById("app-style").href = "style.css?cb=" + key;
+      window.__cacheBustKey = key;
+    })();
+  </script>
 </head>
 <body>
   <main class="app-shell">
@@ -30,6 +37,13 @@
   </main>
 
   <script src="https://code.jquery.com/jquery-3.7.1.min.js" integrity="sha256-/JqT3SQfawRcv/BIHPThkBvs0OEvtFFmqPF/lYI/Cxo=" crossorigin="anonymous"></script>
-  <script src="app.js"></script>
+  <script>
+    (function () {
+      var key = window.__cacheBustKey || Date.now();
+      var appScript = document.createElement("script");
+      appScript.src = "app.js?cb=" + key;
+      document.body.appendChild(appScript);
+    })();
+  </script>
 </body>
 </html>
