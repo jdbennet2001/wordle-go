@@ -21,6 +21,7 @@ html,
 body {
   margin: 0;
   min-height: 100%;
+  -webkit-text-size-adjust: 100%;
   color: var(--ink);
   font-family: "Trebuchet MS", "Segoe UI", sans-serif;
   background: radial-gradient(circle at 12% 8%, #fef9e8 0%, transparent 42%),
@@ -74,6 +75,7 @@ body {
   padding: 8px 14px;
   font-weight: 700;
   cursor: pointer;
+  touch-action: manipulation;
 }
 
 .header-actions button:hover {
@@ -197,6 +199,7 @@ body {
   padding: 0 8px;
   font-weight: 700;
   cursor: pointer;
+  touch-action: manipulation;
 }
 
 .key.hit {
