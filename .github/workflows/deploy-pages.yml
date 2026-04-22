@@ -14,35 +14,22 @@ concurrency:
 
 jobs:
   build:
-    name: Build static site
+    name: Prepare static site
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Patch asset paths for GitHub Pages subpath
+      - name: Prepare root site artifact from public
         run: |
-          REPO_NAME="${{ github.event.repository.name }}"
-          BASE="/${REPO_NAME}"
-
-          echo "Using base path: ${BASE}"
-
-          # Update index.html paths
-          sed -i \
-            -e "s|href=\"/style.css\"|href=\"${BASE}/style.css\"|g" \
-            -e "s|src=\"/app.js\"|src=\"${BASE}/app.js\"|g" \
-            public/index.html
-
-          # Update JS fetch path
-          sed -i \
-            -e "s|\"/words.json\"|\"${BASE}/words.json\"|g" \
-            public/app.js
+          mkdir -p _site
+          cp -a public/. _site/
 
       - name: Upload artifact for Pages
         uses: actions/upload-pages-artifact@v3
         with:
-          path: public
+          path: _site
 
   deploy:
     name: Deploy to GitHub Pages
