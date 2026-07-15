@@ -42,7 +42,10 @@ The result is a lightweight app that is easy to run locally and easy to publish 
 ├── .github/
 │   └── workflows/
 │       ├── deploy-pages.yml
-│       └── publish-ghcr.yml
+│       ├── publish-ghcr.yml
+│       ├── publish-ecr.yml
+│       ├── publish-to-ecr.yml
+│       └── remove-ecr.yml
 ├── .vscode/
 │   └── launch.json
 ├── public/
@@ -295,6 +298,251 @@ docker pull ghcr.io/jdbennet2001/wordle-go:latest
 ```
 
 Or use one of the SHA/branch/tag versions printed by the workflow.
+
+## AWS ECR Docker Publish (PoC)
+
+As a proof of concept, this repository also includes workflows for publishing the image to a private Amazon Elastic Container Registry (ECR) repository:
+
+1. .github/workflows/publish-to-ecr.yml
+	Copies the already-published GHCR image to ECR. Creates the ECR repository first if it does not exist. Run the GHCR publish workflow before this one.
+2. .github/workflows/remove-ecr.yml
+	Tears down the ECR repository, deleting all images in it. Requires re-typing the repository name as a confirmation input.
+3. .github/workflows/publish-ecr.yml
+	Earlier variant that rebuilds the image from source and pushes directly to ECR, bypassing GHCR.
+
+All run on manual trigger only (workflow_dispatch). publish-to-ecr and remove-ecr can also be invoked from another workflow (workflow_call), in which case the AWS access key secrets are passed in as inputs by the caller.
+
+### publish-to-ecr: how the copy works
+
+Rather than rebuilding, the workflow logs in to both registries and runs:
+
+```bash
+docker buildx imagetools create --tag <ecr-registry>/wordle-go:<tag> ghcr.io/<owner>/<repo>:<tag>
+```
+
+This copies the full manifest list — both linux/amd64 and linux/arm64 — registry-to-registry without pulling image layers to the runner, so the ECR image is byte-identical to the GHCR one.
+
+Inputs (all optional, with defaults):
+
+1. image-tag — GHCR tag to publish (default: latest)
+2. aws-region — region of the ECR repository (default: eu-west-1)
+3. ecr-repository — ECR repository name (default: wordle-go)
+
+### remove-ecr: teardown
+
+Deletes the ECR repository with `aws ecr delete-repository --force` (removes contained images too). Safeguards:
+
+1. The confirm input must exactly match the repository name, or the run aborts before touching AWS.
+2. If the repository does not exist, the workflow reports that and exits successfully (idempotent).
+
+### What gets published
+
+The image is pushed to a private ECR repository in your AWS account:
+
+- `<account-id>.dkr.ecr.<region>.amazonaws.com/<ECR_REPOSITORY>`
+
+The registry host is resolved automatically at run time by `aws-actions/amazon-ecr-login`, so you never hard-code the account ID.
+
+Both publish paths create the ECR repository on first run if it does not already exist (`describe-repositories || create-repository`, with scan-on-push enabled), so no manual repo provisioning is required.
+
+### Authentication (access key secrets)
+
+This PoC authenticates with a long-lived IAM access key stored as GitHub Actions secrets. Add these under Settings -> Secrets and variables -> Actions -> Secrets:
+
+1. AWS_ACCESS_KEY_ID
+2. AWS_SECRET_ACCESS_KEY
+
+The IAM user/role behind the key needs permission to authenticate to ECR and push images, for example:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "EcrAuth",
+      "Effect": "Allow",
+      "Action": "ecr:GetAuthorizationToken",
+      "Resource": "*"
+    },
+    {
+      "Sid": "EcrPushCreateAndRemove",
+      "Effect": "Allow",
+      "Action": [
+        "ecr:DescribeRepositories",
+        "ecr:DescribeImages",
+        "ecr:CreateRepository",
+        "ecr:DeleteRepository",
+        "ecr:BatchCheckLayerAvailability",
+        "ecr:BatchGetImage",
+        "ecr:GetDownloadUrlForLayer",
+        "ecr:InitiateLayerUpload",
+        "ecr:UploadLayerPart",
+        "ecr:CompleteLayerUpload",
+        "ecr:PutImage"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+> Note: access keys are used here for PoC simplicity. For anything beyond a PoC, prefer GitHub OIDC federation with an assumed IAM role so no long-lived credentials are stored in the repository.
+
+### Tags that are produced
+
+publish-to-ecr copies exactly one tag per run — the image-tag input (default: latest). Run it again with a different tag to publish more.
+
+The legacy publish-ecr.yml build variant instead reuses the `docker/metadata-action` scheme from the GHCR workflow (branch, git tag, commit SHA, and latest on the default branch).
+
+### Manual publish steps
+
+1. Add the AWS access key secrets (once).
+2. Run Build and Publish GHCR Image first, so the source image exists in GHCR.
+3. Open GitHub -> Actions.
+4. Select publish-to-ecr.
+5. Click Run workflow, adjusting image-tag / aws-region / ecr-repository if needed.
+6. Wait for completion and review the Print image references step output.
+
+### Manual teardown steps
+
+1. Open GitHub -> Actions.
+2. Select remove-ecr.
+3. Click Run workflow, set aws-region / ecr-repository if they differ from the defaults, and type the repository name into the confirm field.
+4. The run deletes the ECR repository and all images in it.
+
+### Pulling the image
+
+Authenticate Docker to your registry, then pull. Replace `<account-id>` and `<region>` with your values (both are printed by the workflow):
+
+```bash
+aws ecr get-login-password --region <region> \
+  | docker login --username AWS --password-stdin <account-id>.dkr.ecr.<region>.amazonaws.com
+
+docker pull <account-id>.dkr.ecr.<region>.amazonaws.com/wordle-go:latest
+```
+
+Or use one of the SHA/branch/tag versions printed by the workflow.
+
+### Granting external users read-only pull access
+
+The ECR repository is private, so external users cannot pull anonymously. Instead, a select set of users are granted access by issuing them read-only IAM credentials scoped to this repository.
+
+The model:
+
+1. One IAM managed policy grants read-only pull access to this repository only.
+2. One IAM group carries that policy.
+3. Each external user gets an IAM user in the group, with an access key as their read-only credential.
+
+Access is revoked per-user by deleting their access key (or the user), without touching anyone else.
+
+#### 1. Create the read-only policy
+
+Save as `ecr-wordle-readonly.json` (replace `<account-id>` and `<region>`):
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "EcrAuth",
+      "Effect": "Allow",
+      "Action": "ecr:GetAuthorizationToken",
+      "Resource": "*"
+    },
+    {
+      "Sid": "EcrPullWordleGo",
+      "Effect": "Allow",
+      "Action": [
+        "ecr:BatchCheckLayerAvailability",
+        "ecr:GetDownloadUrlForLayer",
+        "ecr:BatchGetImage",
+        "ecr:DescribeImages",
+        "ecr:ListImages"
+      ],
+      "Resource": "arn:aws:ecr:<region>:<account-id>:repository/wordle-go"
+    }
+  ]
+}
+```
+
+Notes:
+
+- `ecr:GetAuthorizationToken` must be `Resource: "*"` — it is an account-level action and cannot be scoped to one repository.
+- The pull actions are scoped to the `wordle-go` repository ARN only, so the credential cannot read any other repository in the account.
+
+Create it:
+
+```bash
+aws iam create-policy \
+  --policy-name ecr-wordle-readonly \
+  --policy-document file://ecr-wordle-readonly.json
+```
+
+#### 2. Create the group and attach the policy
+
+```bash
+aws iam create-group --group-name wordle-go-readers
+
+aws iam attach-group-policy \
+  --group-name wordle-go-readers \
+  --policy-arn arn:aws:iam::<account-id>:policy/ecr-wordle-readonly
+```
+
+#### 3. Onboard an external user
+
+For each user to be granted access:
+
+```bash
+aws iam create-user --user-name wordle-reader-<name>
+aws iam add-user-to-group --group-name wordle-go-readers --user-name wordle-reader-<name>
+aws iam create-access-key --user-name wordle-reader-<name>
+```
+
+The `create-access-key` output contains the `AccessKeyId` and `SecretAccessKey`. Deliver these to the user through a secure channel (not email or chat) — the secret is shown only once.
+
+#### 4. Instructions for the external user
+
+Prerequisites: AWS CLI and Docker installed.
+
+Configure the issued credentials (a named profile keeps them separate from any other AWS credentials):
+
+```bash
+aws configure --profile wordle-reader
+# AWS Access Key ID:     <issued key id>
+# AWS Secret Access Key: <issued secret>
+# Default region name:   <region>
+```
+
+Authenticate Docker and pull:
+
+```bash
+aws ecr get-login-password --region <region> --profile wordle-reader \
+  | docker login --username AWS --password-stdin <account-id>.dkr.ecr.<region>.amazonaws.com
+
+docker pull <account-id>.dkr.ecr.<region>.amazonaws.com/wordle-go:latest
+```
+
+The Docker login token expires after 12 hours; users re-run the `get-login-password` line to refresh it. The underlying access key does not expire.
+
+#### 5. Revoking access
+
+Remove a single user's access:
+
+```bash
+aws iam list-access-keys --user-name wordle-reader-<name>
+aws iam delete-access-key --user-name wordle-reader-<name> --access-key-id <key-id>
+aws iam remove-user-from-group --group-name wordle-go-readers --user-name wordle-reader-<name>
+aws iam delete-user --user-name wordle-reader-<name>
+```
+
+#### Production considerations
+
+This IAM-user model is deliberately simple for a PoC. For a production rollout, consider:
+
+- Short-lived credentials via IAM Identity Center or federation instead of long-lived access keys
+- A cross-account repository policy if consumers have their own AWS accounts (they then use their own credentials — nothing to issue or rotate)
+- ECR pull-through or replication if consumers are in other regions
+- CloudTrail monitoring of `GetAuthorizationToken` / `BatchGetImage` events for audit of who pulled what, when
 
 ## Local Deployment - Docker (Basic Test)
 

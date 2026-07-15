@@ -1,0 +1,82 @@
+name: remove-ecr
+
+on:
+  workflow_dispatch:
+    inputs:
+      aws-region:
+        description: AWS region of the ECR repository
+        required: false
+        default: eu-west-1
+        type: string
+      ecr-repository:
+        description: ECR repository name to remove
+        required: false
+        default: wordle-go
+        type: string
+      confirm:
+        description: Type the repository name again to confirm deletion
+        required: true
+        type: string
+
+  workflow_call:
+    inputs:
+      aws-region:
+        required: false
+        default: eu-west-1
+        type: string
+      ecr-repository:
+        required: false
+        default: wordle-go
+        type: string
+      confirm:
+        required: true
+        type: string
+    secrets:
+      AWS_ACCESS_KEY_ID:
+        required: true
+      AWS_SECRET_ACCESS_KEY:
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: ${{ inputs.aws-region }}
+  ECR_REPOSITORY: ${{ inputs.ecr-repository }}
+
+jobs:
+  remove:
+    name: Remove ECR Repository
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Verify confirmation
+        run: |
+          if [ "${{ inputs.confirm }}" != "${ECR_REPOSITORY}" ]; then
+            echo "::error::Confirmation '${{ inputs.confirm }}' does not match repository name '${ECR_REPOSITORY}'. Aborting."
+            exit 1
+          fi
+          echo "Confirmation accepted for '${ECR_REPOSITORY}'."
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Remove ECR repository
+        run: |
+          if aws ecr describe-repositories \
+            --repository-names "${ECR_REPOSITORY}" \
+            --region "${AWS_REGION}" >/dev/null 2>&1; then
+            echo "Deleting ECR repository '${ECR_REPOSITORY}' and all images in it..."
+            # --force deletes the repository even if it contains images
+            aws ecr delete-repository \
+              --repository-name "${ECR_REPOSITORY}" \
+              --region "${AWS_REGION}" \
+              --force
+            echo "Repository '${ECR_REPOSITORY}' deleted."
+          else
+            echo "ECR repository '${ECR_REPOSITORY}' does not exist in ${AWS_REGION}. Nothing to remove."
+          fi

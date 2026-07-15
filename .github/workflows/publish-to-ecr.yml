@@ -1,0 +1,120 @@
+name: publish-to-ecr
+
+on:
+  workflow_dispatch:
+    inputs:
+      image-tag:
+        description: GHCR image tag to publish to ECR
+        required: false
+        default: latest
+        type: string
+      aws-region:
+        description: AWS region for the ECR repository
+        required: false
+        default: eu-west-1
+        type: string
+      ecr-repository:
+        description: ECR repository name
+        required: false
+        default: wordle-go
+        type: string
+
+  workflow_call:
+    inputs:
+      image-tag:
+        required: false
+        default: latest
+        type: string
+      aws-region:
+        required: false
+        default: eu-west-1
+        type: string
+      ecr-repository:
+        required: false
+        default: wordle-go
+        type: string
+    secrets:
+      AWS_ACCESS_KEY_ID:
+        required: true
+      AWS_SECRET_ACCESS_KEY:
+        required: true
+
+permissions:
+  contents: read
+  packages: read
+
+env:
+  IMAGE_TAG: ${{ inputs.image-tag }}
+  AWS_REGION: ${{ inputs.aws-region }}
+  ECR_REPOSITORY: ${{ inputs.ecr-repository }}
+
+jobs:
+  publish:
+    name: Copy GHCR Image to ECR
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Resolve GHCR image name
+        id: ghcr
+        run: |
+          # GHCR requires a lowercase image path
+          echo "image=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Create ECR repository if it does not exist
+        run: |
+          if aws ecr describe-repositories \
+            --repository-names "${ECR_REPOSITORY}" \
+            --region "${AWS_REGION}" >/dev/null 2>&1; then
+            echo "ECR repository '${ECR_REPOSITORY}' already exists."
+          else
+            echo "Creating ECR repository '${ECR_REPOSITORY}'..."
+            aws ecr create-repository \
+              --repository-name "${ECR_REPOSITORY}" \
+              --region "${AWS_REGION}" \
+              --image-scanning-configuration scanOnPush=true
+          fi
+
+      - name: Copy image from GHCR to ECR
+        run: |
+          SOURCE="${{ steps.ghcr.outputs.image }}:${IMAGE_TAG}"
+          TARGET="${{ steps.login-ecr.outputs.registry }}/${ECR_REPOSITORY}:${IMAGE_TAG}"
+
+          echo "Copying ${SOURCE} -> ${TARGET}"
+          # imagetools copies the full manifest list (all architectures)
+          # registry-to-registry without pulling layers to the runner.
+          docker buildx imagetools create --tag "${TARGET}" "${SOURCE}"
+
+      - name: Verify image in ECR
+        run: |
+          aws ecr describe-images \
+            --repository-name "${ECR_REPOSITORY}" \
+            --image-ids imageTag="${IMAGE_TAG}" \
+            --region "${AWS_REGION}" \
+            --query 'imageDetails[0].{tags:imageTags,pushedAt:imagePushedAt,sizeBytes:imageSizeInBytes}' \
+            --output table
+
+      - name: Print image references
+        run: |
+          echo "Published:"
+          echo "  ${{ steps.login-ecr.outputs.registry }}/${ECR_REPOSITORY}:${IMAGE_TAG}"
+          echo
+          echo "Pull command:"
+          echo "  docker pull ${{ steps.login-ecr.outputs.registry }}/${ECR_REPOSITORY}:${IMAGE_TAG}"
