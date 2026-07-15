@@ -18,6 +18,11 @@ on:
         required: false
         default: wordle-go
         type: string
+      container-name:
+        description: Friendly name applied as an extra tag on the ECR image
+        required: false
+        default: wordle
+        type: string
 
   workflow_call:
     inputs:
@@ -33,6 +38,10 @@ on:
         required: false
         default: wordle-go
         type: string
+      container-name:
+        required: false
+        default: wordle
+        type: string
     secrets:
       AWS_ACCESS_KEY_ID:
         required: true
@@ -47,6 +56,7 @@ env:
   IMAGE_TAG: ${{ inputs.image-tag }}
   AWS_REGION: ${{ inputs.aws-region }}
   ECR_REPOSITORY: ${{ inputs.ecr-repository }}
+  CONTAINER_NAME: ${{ inputs.container-name }}
 
 jobs:
   publish:
@@ -95,12 +105,15 @@ jobs:
       - name: Copy image from GHCR to ECR
         run: |
           SOURCE="${{ steps.ghcr.outputs.image }}:${IMAGE_TAG}"
-          TARGET="${{ steps.login-ecr.outputs.registry }}/${ECR_REPOSITORY}:${IMAGE_TAG}"
+          TARGET_BASE="${{ steps.login-ecr.outputs.registry }}/${ECR_REPOSITORY}"
 
-          echo "Copying ${SOURCE} -> ${TARGET}"
+          echo "Copying ${SOURCE} -> ${TARGET_BASE}:${IMAGE_TAG} (+ tag '${CONTAINER_NAME}')"
           # imagetools copies the full manifest list (all architectures)
           # registry-to-registry without pulling layers to the runner.
-          docker buildx imagetools create --tag "${TARGET}" "${SOURCE}"
+          docker buildx imagetools create \
+            --tag "${TARGET_BASE}:${IMAGE_TAG}" \
+            --tag "${TARGET_BASE}:${CONTAINER_NAME}" \
+            "${SOURCE}"
 
       - name: Verify image in ECR
         run: |
@@ -115,6 +128,7 @@ jobs:
         run: |
           echo "Published:"
           echo "  ${{ steps.login-ecr.outputs.registry }}/${ECR_REPOSITORY}:${IMAGE_TAG}"
+          echo "  ${{ steps.login-ecr.outputs.registry }}/${ECR_REPOSITORY}:${CONTAINER_NAME}"
           echo
           echo "Pull command:"
           echo "  docker pull ${{ steps.login-ecr.outputs.registry }}/${ECR_REPOSITORY}:${IMAGE_TAG}"

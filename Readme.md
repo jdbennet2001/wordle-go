@@ -327,6 +327,9 @@ Inputs (all optional, with defaults):
 1. image-tag — GHCR tag to publish (default: latest)
 2. aws-region — region of the ECR repository (default: eu-west-1)
 3. ecr-repository — ECR repository name (default: wordle-go)
+4. container-name — friendly name applied as an extra tag on the same ECR image (default: wordle), so the image is easy to identify in the console
+
+Both tags point at the same image digest — pulling `:latest` or `:wordle` gives the identical image.
 
 ### remove-ecr: teardown
 
