@@ -43,9 +43,10 @@ The result is a lightweight app that is easy to run locally and easy to publish 
 │   └── workflows/
 │       ├── deploy-pages.yml
 │       ├── publish-ghcr.yml
-│       ├── publish-ecr.yml
-│       ├── publish-to-ecr.yml
+│       ├── mirror-to-ecr.yml
 │       └── remove-ecr.yml
+├── deploy/
+│   └── images.yaml
 ├── .vscode/
 │   └── launch.json
 ├── public/
@@ -303,33 +304,37 @@ Or use one of the SHA/branch/tag versions printed by the workflow.
 
 As a proof of concept, this repository also includes workflows for publishing the image to a private Amazon Elastic Container Registry (ECR) repository:
 
-1. .github/workflows/publish-to-ecr.yml
-	Copies the already-published GHCR image to ECR. Creates the ECR repository first if it does not exist. Run the GHCR publish workflow before this one.
+1. .github/workflows/mirror-to-ecr.yml
+	Manifest-driven. Mirrors every service listed in deploy/images.yaml from GHCR to ECR, creating each ECR repository as needed.
 2. .github/workflows/remove-ecr.yml
-	Tears down the ECR repository, deleting all images in it. Requires re-typing the repository name as a confirmation input.
-3. .github/workflows/publish-ecr.yml
-	Earlier variant that rebuilds the image from source and pushes directly to ECR, bypassing GHCR.
+	Tears down an ECR repository, deleting all images in it. Requires re-typing the repository name as a confirmation input.
 
-All run on manual trigger only (workflow_dispatch). publish-to-ecr and remove-ecr can also be invoked from another workflow (workflow_call), in which case the AWS access key secrets are passed in as inputs by the caller.
+### The deployment manifest (deploy/images.yaml)
 
-### publish-to-ecr: how the copy works
+deploy/images.yaml is the single source of truth for the images that make up the deployment. It has three parts:
 
-Rather than rebuilding, the workflow logs in to both registries and runs:
+1. `registries` — where images live. `ghcr` is the source (owner namespace included); `ecr` is the target. Selecting one as the `${REGISTRY}` prefix is all a docker-compose consumer changes to switch registries.
+2. `aws.region` — the region the ECR repositories live in.
+3. `services` — a map of service name to its deployment. Each service declares a `repository` (image basename, shared across both registries), a `tag`, optional `aliases` (extra ECR tags), an optional `digest` (pin for a reproducible deployment), and an optional `source` (only when the image lives outside the ghcr prefix, e.g. a third-party image mirrored into ECR).
+
+mirror-to-ecr reads this file, resolves each service's source (`<ghcr>/<repository>` unless `source` overrides it), copies it to `<ecr>/<repository>` with the same tag plus aliases, and writes a Service / ECR reference / Digest table to the run summary. Because the service key is also the docker-compose service name, this map is the bridge between CI and the compose file.
+
+Both run on manual trigger only (workflow_dispatch). Each can also be invoked from another workflow (workflow_call), in which case the AWS access key secrets are passed in as inputs by the caller.
+
+### mirror-to-ecr: how the copy works
+
+For each service, the workflow logs in to both registries and runs:
 
 ```bash
-docker buildx imagetools create --tag <ecr-registry>/wordle-go:<tag> ghcr.io/<owner>/<repo>:<tag>
+docker buildx imagetools create \
+  --tag <ecr>/<repository>:<tag> \
+  --tag <ecr>/<repository>:<alias> \
+  <ghcr>/<repository>:<tag>
 ```
 
-This copies the full manifest list — both linux/amd64 and linux/arm64 — registry-to-registry without pulling image layers to the runner, so the ECR image is byte-identical to the GHCR one.
+This copies the full manifest list — both linux/amd64 and linux/arm64 — registry-to-registry without pulling image layers to the runner, so the ECR image is byte-identical to (and shares the digest of) the GHCR one. All aliases point at that same digest, so pulling `:latest` or `:wordle` gives the identical image.
 
-Inputs (all optional, with defaults):
-
-1. image-tag — GHCR tag to publish (default: latest)
-2. aws-region — region of the ECR repository (default: eu-west-1)
-3. ecr-repository — ECR repository name (default: wordle-go)
-4. container-name — friendly name applied as an extra tag on the same ECR image (default: wordle), so the image is easy to identify in the console
-
-Both tags point at the same image digest — pulling `:latest` or `:wordle` gives the identical image.
+The workflow takes a single input, `manifest` (default: `deploy/images.yaml`); everything else — region, registries, per-service tags and aliases — comes from the manifest.
 
 ### remove-ecr: teardown
 
@@ -346,7 +351,7 @@ The image is pushed to a private ECR repository in your AWS account:
 
 The registry host is resolved automatically at run time by `aws-actions/amazon-ecr-login`, so you never hard-code the account ID.
 
-Both publish paths create the ECR repository on first run if it does not already exist (`describe-repositories || create-repository`, with scan-on-push enabled), so no manual repo provisioning is required.
+mirror-to-ecr creates each ECR repository on first run if it does not already exist (`describe-repositories || create-repository`, with scan-on-push enabled), so no manual repo provisioning is required.
 
 ### Authentication (access key secrets)
 
@@ -393,18 +398,16 @@ The IAM user/role behind the key needs permission to authenticate to ECR and pus
 
 ### Tags that are produced
 
-publish-to-ecr copies exactly one tag per run — the image-tag input (default: latest). Run it again with a different tag to publish more.
-
-The legacy publish-ecr.yml build variant instead reuses the `docker/metadata-action` scheme from the GHCR workflow (branch, git tag, commit SHA, and latest on the default branch).
+Per service, mirror-to-ecr applies the manifest `tag` plus any `aliases` — for wordle-go that is `latest` and `wordle`, both pointing at the same digest. Change or add tags by editing the service entry in deploy/images.yaml.
 
 ### Manual publish steps
 
 1. Add the AWS access key secrets (once).
-2. Run Build and Publish GHCR Image first, so the source image exists in GHCR.
-3. Open GitHub -> Actions.
-4. Select publish-to-ecr.
-5. Click Run workflow, adjusting image-tag / aws-region / ecr-repository if needed.
-6. Wait for completion and review the Print image references step output.
+2. Run Build and Publish GHCR Image first, so the source images exist in GHCR.
+3. Confirm deploy/images.yaml lists the services and target registry you want.
+4. Open GitHub -> Actions.
+5. Select mirror-to-ecr, then Run workflow.
+6. Wait for completion and review the Mirrored images table in the run summary.
 
 ### Manual teardown steps
 

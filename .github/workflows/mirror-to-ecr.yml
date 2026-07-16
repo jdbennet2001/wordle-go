@@ -1,0 +1,169 @@
+name: mirror-to-ecr
+
+on:
+  workflow_dispatch:
+    inputs:
+      manifest:
+        description: Path to the deployment manifest
+        required: false
+        default: deploy/images.yaml
+        type: string
+
+  workflow_call:
+    inputs:
+      manifest:
+        required: false
+        default: deploy/images.yaml
+        type: string
+    secrets:
+      AWS_ACCESS_KEY_ID:
+        required: true
+      AWS_SECRET_ACCESS_KEY:
+        required: true
+
+permissions:
+  contents: read
+  packages: read
+
+env:
+  MANIFEST: ${{ inputs.manifest }}
+
+jobs:
+  mirror:
+    name: Mirror manifest images GHCR to ECR
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Load deployment config
+        id: cfg
+        run: |
+          set -euo pipefail
+          if [ ! -f "$MANIFEST" ]; then
+            echo "::error::Manifest not found: $MANIFEST"
+            exit 1
+          fi
+          region=$(yq '.aws.region' "$MANIFEST")
+          ghcr=$(yq '.registries.ghcr' "$MANIFEST")
+          ecr=$(yq '.registries.ecr' "$MANIFEST")
+          for v in region ghcr ecr; do
+            if [ "${!v}" = "null" ] || [ -z "${!v}" ]; then
+              echo "::error::Missing required manifest value: $v"
+              exit 1
+            fi
+          done
+          {
+            echo "region=$region"
+            echo "ghcr=$ghcr"
+            echo "ecr=$ecr"
+          } >> "$GITHUB_OUTPUT"
+          echo "Region=$region  GHCR=$ghcr  ECR=$ecr"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ steps.cfg.outputs.region }}
+
+      - name: Log in to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Mirror images from GHCR to ECR
+        env:
+          AWS_REGION: ${{ steps.cfg.outputs.region }}
+          GHCR_PREFIX: ${{ steps.cfg.outputs.ghcr }}
+          ECR_PREFIX: ${{ steps.cfg.outputs.ecr }}
+        run: |
+          set -euo pipefail
+
+          services=$(yq '.services | keys | .[]' "$MANIFEST")
+          if [ -z "$services" ]; then
+            echo "::error::No services defined in $MANIFEST"
+            exit 1
+          fi
+          echo "Mirroring services from $MANIFEST into $ECR_PREFIX"
+
+          {
+            echo "### Mirrored images"
+            echo ""
+            echo "| Service | ECR reference | Digest |"
+            echo "| --- | --- | --- |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          while IFS= read -r svc; do
+            [ -n "$svc" ] || continue
+
+            # yq prints the literal "null" for absent keys — apply defaults.
+            repo=$(svc="$svc" yq '.services[strenv(svc)].repository' "$MANIFEST")
+            [ "$repo" = "null" ] && repo="$svc"
+            tag=$(svc="$svc" yq '.services[strenv(svc)].tag' "$MANIFEST")
+            [ "$tag" = "null" ] && tag="latest"
+            digest=$(svc="$svc" yq '.services[strenv(svc)].digest' "$MANIFEST")
+            [ "$digest" = "null" ] && digest=""
+            source=$(svc="$svc" yq '.services[strenv(svc)].source' "$MANIFEST")
+            [ "$source" = "null" ] && source="${GHCR_PREFIX}/${repo}"
+
+            # Pin by digest (immutable) when provided, else copy by tag.
+            if [ -n "$digest" ]; then
+              src_ref="${source}@${digest}"
+            else
+              src_ref="${source}:${tag}"
+            fi
+
+            echo "::group::${svc}  (${src_ref})"
+
+            # Create the ECR repository on first use.
+            if aws ecr describe-repositories \
+                 --repository-names "$repo" --region "$AWS_REGION" >/dev/null 2>&1; then
+              echo "Repository '$repo' exists."
+            else
+              echo "Creating repository '$repo'..."
+              aws ecr create-repository \
+                --repository-name "$repo" --region "$AWS_REGION" \
+                --image-scanning-configuration scanOnPush=true >/dev/null
+            fi
+
+            # Target tag list: the primary tag plus any aliases.
+            target_args=(--tag "${ECR_PREFIX}/${repo}:${tag}")
+            all_tags="$tag"
+            alias_count=$(svc="$svc" yq '.services[strenv(svc)].aliases | length' "$MANIFEST")
+            if [ "$alias_count" -gt 0 ]; then
+              for j in $(seq 0 $((alias_count - 1))); do
+                alias=$(svc="$svc" j="$j" yq '.services[strenv(svc)].aliases[env(j)]' "$MANIFEST")
+                target_args+=(--tag "${ECR_PREFIX}/${repo}:${alias}")
+                all_tags="${all_tags}, ${alias}"
+              done
+            fi
+
+            echo "Copying ${src_ref} -> ${ECR_PREFIX}/${repo} (tags: ${all_tags})"
+            # imagetools copies the full manifest list (all architectures)
+            # registry-to-registry, preserving the digest, without pulling layers.
+            docker buildx imagetools create "${target_args[@]}" "$src_ref"
+
+            pushed_digest=$(aws ecr describe-images \
+              --repository-name "$repo" \
+              --image-ids imageTag="$tag" \
+              --region "$AWS_REGION" \
+              --query 'imageDetails[0].imageDigest' --output text)
+            echo "Digest: ${pushed_digest}"
+
+            echo "| \`${svc}\` | \`${ECR_PREFIX}/${repo}:${tag}\` | \`${pushed_digest}\` |" \
+              >> "$GITHUB_STEP_SUMMARY"
+
+            echo "::endgroup::"
+          done <<< "$services"
+
+          echo "Done."

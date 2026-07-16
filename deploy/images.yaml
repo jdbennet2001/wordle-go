@@ -1,0 +1,56 @@
+# Deployment manifest — single source of truth for the images that make up
+# this deployment.
+#
+# Consumed by:
+#   1. .github/workflows/mirror-to-ecr.yml   mirrors each service image GHCR -> ECR
+#   2. .env generation for docker-compose    ${REGISTRY} prefix + tags/digests
+#
+# Model:
+#   - `registries` defines WHERE images live. Pick one as ${REGISTRY} at deploy
+#     time; the mirror workflow copies from `ghcr` into `ecr`.
+#   - `services` maps a service name to its deployment. Each service shares one
+#     image basename (`repository`) across every registry, so switching
+#     registries is a single ${REGISTRY} change and nothing else.
+
+# The registries this deployment can be pulled from.
+registries:
+  # Source registry + owner namespace (where the CI build publishes).
+  ghcr: ghcr.io/jdbennet2001
+  # Target registry (the private ECR the mirror workflow pushes to).
+  ecr: 612054226364.dkr.ecr.eu-west-1.amazonaws.com
+
+# AWS settings for the ECR target.
+aws:
+  region: eu-west-1
+
+# Service name -> deployment. The service name is also the docker-compose
+# service key, so this map is the bridge between CI and the compose file.
+services:
+  wordle-go:
+    # Image basename, identical in every registry. The full reference is
+    # <registry>/<repository>, e.g. ghcr.io/jdbennet2001/wordle-go or
+    # 612054226364.dkr.ecr.eu-west-1.amazonaws.com/wordle-go.
+    repository: wordle-go
+    # Tag to deploy / copy. Defaults to `latest` if omitted.
+    tag: latest
+    # Extra tags to apply on the ECR image (friendly aliases).
+    aliases:
+      - wordle
+    # Optional: pin an immutable digest for a reproducible deployment. Digests
+    # are preserved by the GHCR -> ECR copy, so the same sha256 is valid in both
+    # registries.
+    # digest: sha256:59cbe9b8d07da05801ef248067b213cde04c995649317a1d8d855617534fdc00
+
+  # Add more services as the deployment grows. Two shapes are supported:
+  #
+  # First-party image (source derived from the ghcr prefix + repository):
+  # api:
+  #   repository: wordle-api
+  #   tag: latest
+  #
+  # Third-party image (source lives outside the ghcr prefix — set it explicitly;
+  # it is still mirrored into ECR under `repository`):
+  # redis:
+  #   repository: wordle-redis
+  #   tag: "7-alpine"
+  #   source: docker.io/library/redis
