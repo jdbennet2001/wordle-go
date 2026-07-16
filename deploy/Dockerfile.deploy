@@ -1,0 +1,10 @@
+# Assets-only image: carries the deployment bundle so a developer with ECR
+# read access can download it using plain docker (no oras or other tooling).
+#
+# This image is never run — the installer creates a container from it and
+# `docker cp`s the files out. busybox keeps it tiny and lets you inspect the
+# contents interactively if needed (docker run --rm -it ... sh).
+FROM busybox:stable
+
+WORKDIR /deploy
+COPY docker-compose.yml .env.ecr install.sh ./

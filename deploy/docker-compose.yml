@@ -1,0 +1,19 @@
+# Local deployment for the wordle-go service.
+#
+# One canonical compose file; the registry is switched purely by which env file
+# you select. Nothing here changes between GHCR and ECR:
+#
+#   docker compose --env-file .env.ghcr up -d    # pull from GHCR
+#   docker compose --env-file .env.ecr  up -d    # pull from ECR
+#
+# REGISTRY / TAG / HOST_PORT are supplied by the selected env file and must
+# match a service defined in images.yaml (service name -> repository basename).
+
+name: wordle
+
+services:
+  wordle-go:
+    image: ${REGISTRY}/wordle-go:${TAG:-latest}
+    ports:
+      - "${HOST_PORT:-2000}:3000"
+    restart: unless-stopped

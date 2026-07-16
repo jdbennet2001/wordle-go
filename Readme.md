@@ -44,9 +44,17 @@ The result is a lightweight app that is easy to run locally and easy to publish 
 │       ├── deploy-pages.yml
 │       ├── publish-ghcr.yml
 │       ├── mirror-to-ecr.yml
+│       ├── package-deploy.yml
 │       └── remove-ecr.yml
 ├── deploy/
-│   └── images.yaml
+│   ├── images.yaml
+│   ├── docker-compose.yml
+│   ├── .env.ghcr
+│   ├── .env.ecr
+│   ├── Dockerfile.deploy
+│   ├── install.sh
+│   ├── wordle-install.sh
+│   └── TEST-PLAN.md
 ├── .vscode/
 │   └── launch.json
 ├── public/
@@ -456,7 +464,7 @@ Save as `ecr-wordle-readonly.json` (replace `<account-id>` and `<region>`):
       "Resource": "*"
     },
     {
-      "Sid": "EcrPullWordleGo",
+      "Sid": "EcrPullWordle",
       "Effect": "Allow",
       "Action": [
         "ecr:BatchCheckLayerAvailability",
@@ -465,7 +473,7 @@ Save as `ecr-wordle-readonly.json` (replace `<account-id>` and `<region>`):
         "ecr:DescribeImages",
         "ecr:ListImages"
       ],
-      "Resource": "arn:aws:ecr:<region>:<account-id>:repository/wordle-go"
+      "Resource": "arn:aws:ecr:<region>:<account-id>:repository/wordle-*"
     }
   ]
 }
@@ -474,7 +482,7 @@ Save as `ecr-wordle-readonly.json` (replace `<account-id>` and `<region>`):
 Notes:
 
 - `ecr:GetAuthorizationToken` must be `Resource: "*"` — it is an account-level action and cannot be scoped to one repository.
-- The pull actions are scoped to the `wordle-go` repository ARN only, so the credential cannot read any other repository in the account.
+- The pull actions are scoped to `wordle-*` repositories, covering both the app image (`wordle-go`) and the install bundle (`wordle-deploy`) while still excluding every other repository in the account.
 
 Create it:
 
@@ -549,6 +557,56 @@ This IAM-user model is deliberately simple for a PoC. For a production rollout, 
 - A cross-account repository policy if consumers have their own AWS accounts (they then use their own credentials — nothing to issue or rotate)
 - ECR pull-through or replication if consumers are in other regions
 - CloudTrail monitoring of `GetAuthorizationToken` / `BatchGetImage` events for audit of who pulled what, when
+
+### Distributing to external developers (install bundle)
+
+External developers who cannot access GitHub still need the compose file and
+install scripts. Rather than host those somewhere separate, they are packaged
+into a tiny **assets image** and published to ECR alongside the app image — so
+the same credential a developer already holds for pulling the image also fetches
+the installer. No GitHub, no S3, no extra tooling beyond the `docker` and `aws`
+CLIs they use anyway.
+
+#### Maintainer: publish the bundle
+
+The `package-deploy` workflow builds `deploy/Dockerfile.deploy` (a busybox image
+carrying `docker-compose.yml`, `.env.ecr`, and `install.sh`) and pushes it to the
+`wordle-deploy` ECR repository, creating that repository if needed:
+
+1. GitHub → Actions → **package-deploy** → **Run workflow**.
+2. It reads the registry and region from `deploy/images.yaml`, so no extra input
+   is required.
+
+Publish it whenever the compose file or install steps change; version it with
+`bundle-tag` the same way images are tagged.
+
+#### Onboard a developer
+
+1. Issue them a read-only ECR credential (see *Granting external users read-only
+   pull access* — the `wordle-*` policy already covers both the image and the
+   bundle).
+2. Hand them the single file `deploy/wordle-install.sh`. It contains no secrets.
+
+#### Developer: run one script
+
+```bash
+./wordle-install.sh
+```
+
+The script preflight-checks the environment **before** doing any work — which is
+what keeps support calls down. It fails early, with an actionable message, if:
+
+1. the `aws` or `docker` CLI is missing,
+2. the Docker daemon is not running,
+3. AWS credentials are missing or invalid (`aws sts get-caller-identity`),
+4. the credentials belong to the wrong AWS account,
+5. ECR login fails, or
+6. the `wordle-deploy` bundle is not readable with their key.
+
+Only once all six pass does it authenticate to ECR, download the bundle with
+plain `docker create` / `docker cp`, and run the bundle's `install.sh`
+(`docker compose --env-file .env.ecr up -d`). The app then serves on
+http://localhost:2000.
 
 ## Local Deployment - Docker (Basic Test)
 
