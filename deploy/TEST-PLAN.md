@@ -261,9 +261,10 @@ cd ~/wordle-test/wordle-deploy && docker compose --env-file .env.ecr down --remo
 docker rmi 612054226364.dkr.ecr.eu-west-1.amazonaws.com/wordle-go:latest 2>/dev/null || true
 rm -rf ~/wordle-test
 
-# Optional: tear down the ECR repositories
-#   GitHub → Actions → remove-ecr → Run workflow, once per repo
-#   (ecr-repository=wordle-go, then wordle-deploy), typing the name to confirm
+# Optional: tear down ALL ECR repositories for this PoC (removes billable storage)
+#   GitHub → Actions → remove-ecr → Run workflow
+#   prefix=wordle-  and type "wordle-" into the confirm field
+#   (one run deletes both wordle-go and wordle-deploy)
 ```
 
 ## Troubleshooting

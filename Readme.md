@@ -315,7 +315,7 @@ As a proof of concept, this repository also includes workflows for publishing th
 1. .github/workflows/mirror-to-ecr.yml
 	Manifest-driven. Mirrors every service listed in deploy/images.yaml from GHCR to ECR, creating each ECR repository as needed.
 2. .github/workflows/remove-ecr.yml
-	Tears down an ECR repository, deleting all images in it. Requires re-typing the repository name as a confirmation input.
+	Prefix sweep. Deletes every ECR repository whose name starts with a given prefix (default `wordle-`), removing the PoC's entire billable footprint in one run. Requires re-typing the prefix as a confirmation input.
 
 ### The deployment manifest (deploy/images.yaml)
 
@@ -344,12 +344,17 @@ This copies the full manifest list — both linux/amd64 and linux/arm64 — regi
 
 The workflow takes a single input, `manifest` (default: `deploy/images.yaml`); everything else — region, registries, per-service tags and aliases — comes from the manifest.
 
-### remove-ecr: teardown
+### remove-ecr: teardown (prefix sweep)
 
-Deletes the ECR repository with `aws ecr delete-repository --force` (removes contained images too). Safeguards:
+Finds every ECR repository whose name starts with `prefix` (default `wordle-`) and deletes each with `aws ecr delete-repository --force` (removes contained images too). One run clears both `wordle-go` and `wordle-deploy` — the only resources in this PoC that accrue cost (ECR storage). IAM users/policies are free and are not touched.
 
-1. The confirm input must exactly match the repository name, or the run aborts before touching AWS.
-2. If the repository does not exist, the workflow reports that and exits successfully (idempotent).
+Inputs: `aws-region` (default `eu-west-1`), `prefix` (default `wordle-`), `confirm` (required).
+
+Safeguards:
+
+1. The `confirm` input must exactly match `prefix`, or the run aborts before touching AWS.
+2. An empty or `*` prefix is rejected, so it can never match every repository in the account.
+3. If nothing matches the prefix, the workflow reports that and exits successfully (idempotent).
 
 ### What gets published
 
@@ -421,8 +426,8 @@ Per service, mirror-to-ecr applies the manifest `tag` plus any `aliases` — for
 
 1. Open GitHub -> Actions.
 2. Select remove-ecr.
-3. Click Run workflow, set aws-region / ecr-repository if they differ from the defaults, and type the repository name into the confirm field.
-4. The run deletes the ECR repository and all images in it.
+3. Click Run workflow, adjust aws-region / prefix if needed, and type the prefix (e.g. `wordle-`) into the confirm field.
+4. The run deletes every matching repository and all images in them.
 
 ### Pulling the image
 

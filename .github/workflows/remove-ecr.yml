@@ -1,20 +1,24 @@
 name: remove-ecr
 
+# Prefix sweep: deletes ALL ECR repositories whose name starts with `prefix`,
+# removing the only billable footprint of this PoC (ECR image storage). IAM
+# users/policies are free and are not touched here.
+
 on:
   workflow_dispatch:
     inputs:
       aws-region:
-        description: AWS region of the ECR repository
+        description: AWS region to sweep
         required: false
         default: eu-west-1
         type: string
-      ecr-repository:
-        description: ECR repository name to remove
+      prefix:
+        description: Delete every ECR repository whose name starts with this prefix
         required: false
-        default: wordle-go
+        default: wordle-
         type: string
       confirm:
-        description: Type the repository name again to confirm deletion
+        description: Re-type the prefix exactly to confirm deletion of ALL matching repositories
         required: true
         type: string
 
@@ -24,9 +28,9 @@ on:
         required: false
         default: eu-west-1
         type: string
-      ecr-repository:
+      prefix:
         required: false
-        default: wordle-go
+        default: wordle-
         type: string
       confirm:
         required: true
@@ -42,21 +46,26 @@ permissions:
 
 env:
   AWS_REGION: ${{ inputs.aws-region }}
-  ECR_REPOSITORY: ${{ inputs.ecr-repository }}
+  PREFIX: ${{ inputs.prefix }}
 
 jobs:
   remove:
-    name: Remove ECR Repository
+    name: Sweep ECR repositories by prefix
     runs-on: ubuntu-latest
 
     steps:
-      - name: Verify confirmation
+      - name: Verify prefix and confirmation
         run: |
-          if [ "${{ inputs.confirm }}" != "${ECR_REPOSITORY}" ]; then
-            echo "::error::Confirmation '${{ inputs.confirm }}' does not match repository name '${ECR_REPOSITORY}'. Aborting."
+          set -euo pipefail
+          if [ -z "${PREFIX}" ] || [ "${PREFIX}" = "*" ]; then
+            echo "::error::prefix must be a non-empty, specific string — an empty or '*' prefix would match every repository in the account."
             exit 1
           fi
-          echo "Confirmation accepted for '${ECR_REPOSITORY}'."
+          if [ "${{ inputs.confirm }}" != "${PREFIX}" ]; then
+            echo "::error::Confirmation '${{ inputs.confirm }}' does not match prefix '${PREFIX}'. Aborting before touching AWS."
+            exit 1
+          fi
+          echo "Confirmed: will sweep repositories starting with '${PREFIX}'."
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -65,18 +74,41 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Remove ECR repository
+      - name: Delete matching repositories
         run: |
-          if aws ecr describe-repositories \
-            --repository-names "${ECR_REPOSITORY}" \
-            --region "${AWS_REGION}" >/dev/null 2>&1; then
-            echo "Deleting ECR repository '${ECR_REPOSITORY}' and all images in it..."
-            # --force deletes the repository even if it contains images
-            aws ecr delete-repository \
-              --repository-name "${ECR_REPOSITORY}" \
-              --region "${AWS_REGION}" \
-              --force
-            echo "Repository '${ECR_REPOSITORY}' deleted."
-          else
-            echo "ECR repository '${ECR_REPOSITORY}' does not exist in ${AWS_REGION}. Nothing to remove."
+          set -euo pipefail
+
+          repos=$(aws ecr describe-repositories --region "$AWS_REGION" \
+            --query "repositories[?starts_with(repositoryName, '${PREFIX}')].repositoryName" \
+            --output text)
+
+          if [ -z "$repos" ]; then
+            echo "No repositories match prefix '${PREFIX}' in ${AWS_REGION}. Nothing to remove."
+            {
+              echo "### remove-ecr"
+              echo ""
+              echo "No repositories matched prefix \`${PREFIX}\` — nothing to remove."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
           fi
+
+          echo "Repositories to delete (prefix '${PREFIX}'):"
+          for r in $repos; do echo "  - $r"; done
+
+          {
+            echo "### Removed ECR repositories (prefix: \`${PREFIX}\`)"
+            echo ""
+            echo "| Repository | Status |"
+            echo "| --- | --- |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          count=0
+          for r in $repos; do
+            echo "Deleting ${r} (and all images in it)..."
+            # --force deletes the repository even if it still contains images.
+            aws ecr delete-repository --repository-name "$r" --region "$AWS_REGION" --force >/dev/null
+            echo "| \`${r}\` | deleted |" >> "$GITHUB_STEP_SUMMARY"
+            count=$((count + 1))
+          done
+
+          echo "Done. Deleted ${count} repository(ies)."
